@@ -1,0 +1,49 @@
+# Docker Compose configuration for TerpSpark Backend
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: terpspark-db
+    environment:
+      POSTGRES_DB: terpspark_db
+      POSTGRES_USER: terpspark_user
+      POSTGRES_PASSWORD: terpspark_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U terpspark_user -d terpspark_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  api:
+    build: .
+    container_name: terpspark-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://terpspark_user:terpspark_pass@db:5432/terpspark_db
+      JWT_SECRET_KEY: dev-secret-key-change-in-production-min-32-chars
+      DEBUG: "True"
+      ENVIRONMENT: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
