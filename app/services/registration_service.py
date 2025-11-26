@@ -243,3 +243,43 @@ class RegistrationService:
         self.db.refresh(registration)
 
         return registration
+
+    def get_user_registrations(
+        self,
+        user_id: str,
+        status_filter: str = "confirmed",
+        include_past: bool = False
+    ) -> list[Registration]:
+        """
+        Get all registrations for a user with filtering.
+
+        Args:
+            user_id: ID of the user
+            status_filter: Filter by status - 'confirmed', 'cancelled', or 'all'
+            include_past: Whether to include past events (default: False)
+
+        Returns:
+            list[Registration]: List of user's registrations
+
+        Business Logic:
+        - Filter by status if not 'all'
+        - Exclude past events unless include_past=True
+        - Return registrations with event details loaded
+        - Sort by event date (upcoming first)
+        """
+        # Convert status filter string to enum
+        status_enum = None
+        if status_filter == "confirmed":
+            status_enum = RegistrationStatus.CONFIRMED
+        elif status_filter == "cancelled":
+            status_enum = RegistrationStatus.CANCELLED
+        # If 'all', status_enum stays None (no filter)
+
+        # Get registrations from repository
+        registrations = self.registration_repo.get_user_registrations(
+            user_id=user_id,
+            status=status_enum,
+            include_past=include_past
+        )
+
+        return registrations
