@@ -402,7 +402,13 @@ pip install email-validator
 
 ### 5. Configure Environment Variables
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (or copy from `.env.example`):
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` with your configuration:
 
 ```env
 # Database
@@ -416,6 +422,16 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440
 # CORS
 CORS_ORIGINS=http://localhost:3000,http://localhost:8000
 
+# Email Configuration
+EMAIL_MODE=mock  # Use "mock" for development (prints to console), "smtp" for production (sends real emails)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password  # For Gmail, use App Password (not regular password)
+SMTP_FROM_EMAIL=your-email@gmail.com
+SMTP_FROM_NAME=TerpSpark
+SMTP_USE_TLS=True
+
 # App Settings
 APP_NAME=TerpSpark Backend API
 APP_VERSION=1.0.0
@@ -425,6 +441,37 @@ HOST=0.0.0.0
 PORT=8000
 LOG_LEVEL=INFO
 ```
+
+#### 📧 Setting Up Gmail for SMTP (Production Emails)
+
+To send real emails using Gmail:
+
+1. **Enable 2-Factor Authentication** on your Google account:
+   - Go to https://myaccount.google.com/security
+   - Enable 2-Step Verification
+
+2. **Create an App Password**:
+   - Go to https://myaccount.google.com/apppasswords
+   - Select "Mail" and your device
+   - Copy the generated 16-character password
+   - Use this as your `SMTP_PASSWORD` (not your regular Gmail password)
+
+3. **Update `.env` file**:
+   ```env
+   EMAIL_MODE=smtp
+   SMTP_USER=your-email@gmail.com
+   SMTP_PASSWORD=your-16-char-app-password
+   SMTP_FROM_EMAIL=your-email@gmail.com
+   ```
+
+4. **Test the email service**:
+   ```bash
+   python test_email.py
+   ```
+
+   This will send a test email to verify your configuration is working.
+
+**Note**: For development, you can use `EMAIL_MODE=mock` which prints emails to the console instead of sending them.
 
 ### 6. Initialize Database
 
@@ -826,14 +873,19 @@ PYTHONPATH=. python add_categories_and_events.py
 - [x] Comprehensive test data
 
 ### 🚧 In Progress
-- [ ] Phase 3: Student Registration Flow
+- [x] Phase 3: Student Registration Flow (In Progress)
+  - [x] Registration API endpoint
+  - [x] QR code generation for tickets
+  - [x] Email notifications (SMTP integration)
+  - [x] HTML email templates
 - [ ] Phase 4: Organizer Event Management
 - [ ] Phase 5: Admin Console & Management
 
 ### 📅 Future Enhancements
 - [ ] Real-time notifications (WebSocket)
-- [ ] Email/SMS integration
-- [ ] QR code generation for tickets
+- [x] Email integration (SMTP with Gmail)
+- [x] QR code generation for tickets
+- [ ] SMS integration
 - [ ] Analytics dashboard
 - [ ] Event recommendations
 - [ ] Social features (comments, ratings)
