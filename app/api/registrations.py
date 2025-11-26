@@ -11,7 +11,9 @@ from app.models.user import User
 from app.schemas.registration import (
     RegistrationCreate,
     RegistrationCreateResponse,
-    RegistrationResponse
+    RegistrationResponse,
+    RegistrationsListResponse,
+    EventBasicInfo
 )
 from app.schemas.auth import ErrorResponse
 
@@ -134,6 +136,140 @@ async def register_for_event(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Registration failed: {str(e)}"
+        )
+
+
+@router.get(
+    "",
+    response_model=RegistrationsListResponse,
+    status_code=status.HTTP_200_OK
+)
+async def get_user_registrations(
+    status: str = "confirmed",
+    include_past: bool = False,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get current user's registrations.
+
+    **Authentication Required:** Yes (must be logged in)
+
+    **Query Parameters:**
+    - `status`: Filter by status - 'confirmed', 'cancelled', or 'all' (default: 'confirmed')
+    - `include_past`: Include past events (default: false)
+
+    **Success Response (200):**
+    ```json
+    {
+        "success": true,
+        "registrations": [
+            {
+                "id": "registration-uuid",
+                "userId": "user-uuid",
+                "eventId": "event-uuid",
+                "event": {
+                    "id": "event-uuid",
+                    "title": "AI & Machine Learning Workshop",
+                    "date": "2025-12-03",
+                    "startTime": "14:00",
+                    "venue": "Engineering Building",
+                    "organizer": {
+                        "id": "organizer-uuid",
+                        "name": "Tech Club",
+                        "email": "techclub@umd.edu"
+                    }
+                },
+                "status": "confirmed",
+                "ticketCode": "TKT-1732635421-abc123",
+                "qrCode": "data:image/png;base64,...",
+                "registeredAt": "2025-11-26T10:30:00Z",
+                "checkInStatus": "not_checked_in",
+                "checkedInAt": null,
+                "guests": [
+                    {
+                        "name": "John Doe",
+                        "email": "john.doe@umd.edu"
+                    }
+                ],
+                "sessions": [],
+                "reminderSent": false,
+                "cancelledAt": null
+            }
+        ]
+    }
+    ```
+
+    **Business Rules:**
+    - Returns only current user's registrations
+    - Filters by status (confirmed/cancelled/all)
+    - By default excludes past events
+    - Sorted by event date (upcoming first)
+    """
+    # Validate status parameter
+    if status not in ["confirmed", "cancelled", "all"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid status parameter. Must be 'confirmed', 'cancelled', or 'all'"
+        )
+
+    # Initialize registration service
+    registration_service = RegistrationService(db)
+
+    try:
+        # Get user's registrations
+        registrations = registration_service.get_user_registrations(
+            user_id=current_user.id,
+            status_filter=status,
+            include_past=include_past
+        )
+
+        # Convert to response format
+        registration_responses = []
+        for reg in registrations:
+            # Build event basic info
+            event_info = None
+            if reg.event:
+                event_info = EventBasicInfo(
+                    id=reg.event.id,
+                    title=reg.event.title,
+                    date=reg.event.date.isoformat() if reg.event.date else "",
+                    startTime=reg.event.start_time.strftime('%H:%M') if reg.event.start_time else "",
+                    venue=reg.event.venue,
+                    organizer={
+                        "id": reg.event.organizer.id if reg.event.organizer else "",
+                        "name": reg.event.organizer.name if reg.event.organizer else "",
+                        "email": reg.event.organizer.email if reg.event.organizer else ""
+                    }
+                )
+
+            registration_response = RegistrationResponse(
+                id=reg.id,
+                userId=reg.user_id,
+                eventId=reg.event_id,
+                status=reg.status.value,
+                ticketCode=reg.ticket_code,
+                qrCode=reg.qr_code,
+                registeredAt=reg.registered_at.isoformat(),
+                checkInStatus=reg.check_in_status.value,
+                checkedInAt=reg.checked_in_at.isoformat() if reg.checked_in_at else None,
+                guests=reg.guests if reg.guests else [],
+                sessions=reg.sessions if reg.sessions else [],
+                reminderSent=reg.reminder_sent,
+                cancelledAt=reg.cancelled_at.isoformat() if reg.cancelled_at else None,
+                event=event_info
+            )
+            registration_responses.append(registration_response)
+
+        return RegistrationsListResponse(
+            success=True,
+            registrations=registration_responses
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve registrations: {str(e)}"
         )
 
 
