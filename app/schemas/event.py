@@ -58,19 +58,9 @@ class EventCreate(EventBase):
         return v
 
 
-class EventUpdate(BaseModel):
-    """Schema for updating an event."""
-    title: Optional[str] = Field(None, min_length=5, max_length=200)
-    description: Optional[str] = Field(None, min_length=50)
-    categoryId: Optional[str] = None
-    date: Optional[str] = None
-    startTime: Optional[str] = None
-    endTime: Optional[str] = None
-    venue: Optional[str] = Field(None, min_length=2, max_length=200)
-    location: Optional[str] = Field(None, min_length=5, max_length=500)
-    capacity: Optional[int] = Field(None, ge=1, le=5000)
-    imageUrl: Optional[str] = Field(None, max_length=500)
-    tags: Optional[List[str]] = None
+class EventUpdate(EventCreate):
+    """Schema for updating an event - uses same validation as EventCreate plus status."""
+    status: Optional[str] = Field(None, description="Event status (draft, pending, published, cancelled)")
 
 
 class OrganizerInfo(BaseModel):

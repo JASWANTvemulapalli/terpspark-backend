@@ -167,7 +167,8 @@ def event_to_response(event) -> EventResponse:
         400: {"model": ErrorResponse, "description": "Validation error"},
         401: {"model": ErrorResponse, "description": "Unauthorized"},
         403: {"model": ErrorResponse, "description": "Forbidden - Not an approved organizer"},
-        404: {"model": ErrorResponse, "description": "Category not found"}
+        404: {"model": ErrorResponse, "description": "Category not found"},
+        409: {"model": ErrorResponse, "description": "Venue conflict - already booked"}
     }
 )
 async def create_event(
@@ -178,14 +179,20 @@ async def create_event(
 ):
     """
     Create a new event.
-    
+
     **Business Rules:**
     - Only approved organizers can create events
     - Events start with 'pending' status (require admin approval)
     - Category must exist and be active
     - Event date must be in the future
     - End time must be after start time
-    
+    - Venue must not have conflicts (checked against date and time)
+
+    **Venue Conflict Checking:**
+    - System checks if the venue is already booked for the same date/time
+    - Conflicts are checked against pending and published events only
+    - Returns 409 Conflict error if venue is already booked
+
     **Required Fields:**
     - title (5-200 characters)
     - description (min 50 characters)
@@ -196,11 +203,11 @@ async def create_event(
     - venue (2-200 characters)
     - location (5-500 characters)
     - capacity (1-5000)
-    
+
     **Optional Fields:**
     - imageUrl
     - tags (array of strings)
-    
+
     **Returns:**
     - Created event details
     """
@@ -315,7 +322,8 @@ async def get_organizer_events(
         400: {"model": ErrorResponse, "description": "Validation error"},
         401: {"model": ErrorResponse, "description": "Unauthorized"},
         403: {"model": ErrorResponse, "description": "Forbidden"},
-        404: {"model": ErrorResponse, "description": "Event not found"}
+        404: {"model": ErrorResponse, "description": "Event not found"},
+        409: {"model": ErrorResponse, "description": "Venue conflict - already booked"}
     }
 )
 async def update_event(
@@ -326,23 +334,48 @@ async def update_event(
     db: Session = Depends(get_db)
 ):
     """
-    Update an existing event.
-    
+    Update an existing event with complete event data.
+
     **Business Rules:**
     - Only event owner or admin can update
     - Cannot update cancelled events
     - Cannot reduce capacity below current registration count
-    - Partial updates supported (only send fields to update)
-    
+    - All fields are required (same as create event)
+    - All validations from event creation apply
+    - Status can be updated (see status rules below)
+    - Venue conflicts are checked (excluding current event)
+
+    **Venue Conflict Checking:**
+    - System checks if the venue is already booked for the same date/time
+    - Current event is excluded from conflict check
+    - Conflicts are checked against pending and published events only
+    - Returns 409 Conflict error if venue is already booked
+
     **Path Parameters:**
     - event_id: Event ID to update
-    
-    **Optional Fields (all fields are optional):**
-    - title, description, categoryId
-    - date, startTime, endTime
-    - venue, location, capacity
-    - imageUrl, tags
-    
+
+    **Required Fields:**
+    - title (5-200 characters)
+    - description (min 50 characters)
+    - categoryId
+    - date (YYYY-MM-DD, must be in future)
+    - startTime (HH:MM, 24-hour format)
+    - endTime (HH:MM, must be after startTime)
+    - venue (2-200 characters)
+    - location (5-500 characters)
+    - capacity (1-5000, cannot be less than registered count)
+
+    **Optional Fields:**
+    - imageUrl (max 500 characters)
+    - tags (array of strings)
+    - status (draft, pending, published, cancelled)
+
+    **Status Update Rules:**
+    - Organizers can set status to: 'draft' or 'pending'
+    - Only admins can set status to: 'published'
+    - To cancel, use the cancel endpoint (not via status update)
+    - If status is not provided, it remains unchanged
+
     **Returns:**
     - Updated event details
     """

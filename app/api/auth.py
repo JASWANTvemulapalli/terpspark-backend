@@ -85,17 +85,23 @@ async def register(
 ):
     """
     Register a new user.
-    
+
     **Business Rules:**
     - Email must be valid UMD email (@umd.edu)
     - Password must be at least 8 characters
     - Students are auto-approved
-    - Organizers require admin approval
+    - Organizers require admin approval (automatically creates approval request)
     - Admins are auto-approved (should be created manually)
-    
+
+    **Organizer Registration Flow:**
+    - When an organizer registers, an `OrganizerApprovalRequest` is automatically created
+    - The request appears in the admin approval queue (`/api/admin/approvals/organizers`)
+    - The organizer account has `isApproved: false` until admin approves
+    - Organizers cannot login until their account is approved
+
     **Returns:**
     - Created user information and JWT access token
-    
+
     **Error Codes:**
     - `EMAIL_ALREADY_EXISTS`: Email is already registered
     - `INVALID_EMAIL`: Email is not a valid UMD email

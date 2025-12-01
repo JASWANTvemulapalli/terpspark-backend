@@ -139,7 +139,21 @@ class OrganizerService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid date format. Use YYYY-MM-DD"
             )
-        
+
+        # Check for venue conflicts
+        conflicting_event = self.event_repo.check_venue_conflict(
+            venue=event_data.venue,
+            event_date=event_date,
+            start_time=event_data.startTime,
+            end_time=event_data.endTime
+        )
+
+        if conflicting_event:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Venue '{event_data.venue}' is already booked on {event_data.date} from {conflicting_event.start_time.strftime('%H:%M')} to {conflicting_event.end_time.strftime('%H:%M')} for event '{conflicting_event.title}'"
+            )
+
         # Create event
         try:
             event = self.event_repo.create(
@@ -211,23 +225,23 @@ class OrganizerService:
         user_agent: Optional[str] = None
     ) -> Event:
         """
-        Update an event.
-        
+        Update an event with complete event data.
+
         Args:
             event_id: Event ID to update
-            event_data: Update data
+            event_data: Complete event data (same as create)
             organizer: Current user
             ip_address: Request IP address
             user_agent: Request user agent
-            
+
         Returns:
             Event: Updated event
-            
+
         Raises:
             HTTPException: If event not found or validation fails
         """
         self._verify_organizer(organizer)
-        
+
         # Get event
         event = self.event_repo.get_by_id(event_id)
         if not event:
@@ -235,89 +249,118 @@ class OrganizerService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Event not found"
             )
-        
+
         self._verify_event_ownership(event, organizer)
-        
+
         # Cannot update cancelled events
         if event.status == EventStatus.CANCELLED:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot update a cancelled event"
             )
-        
-        # Build update dict
-        update_fields = {}
-        
-        if event_data.title is not None:
-            update_fields['title'] = event_data.title
-        
-        if event_data.description is not None:
-            update_fields['description'] = event_data.description
-        
-        if event_data.categoryId is not None:
-            category = self.category_repo.get_by_id(event_data.categoryId)
-            if not category:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Category with ID '{event_data.categoryId}' not found"
-                )
-            update_fields['category_id'] = event_data.categoryId
-        
-        if event_data.date is not None:
+
+        # Validate category exists
+        category = self.category_repo.get_by_id(event_data.categoryId)
+        if not category:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Category with ID '{event_data.categoryId}' not found"
+            )
+
+        # Validate date
+        try:
+            event_date = date.fromisoformat(event_data.date)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid date format. Use YYYY-MM-DD"
+            )
+
+        # Check for venue conflicts (exclude current event)
+        conflicting_event = self.event_repo.check_venue_conflict(
+            venue=event_data.venue,
+            event_date=event_date,
+            start_time=event_data.startTime,
+            end_time=event_data.endTime,
+            exclude_event_id=event_id
+        )
+
+        if conflicting_event:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Venue '{event_data.venue}' is already booked on {event_data.date} from {conflicting_event.start_time.strftime('%H:%M')} to {conflicting_event.end_time.strftime('%H:%M')} for event '{conflicting_event.title}'"
+            )
+
+        # Cannot reduce capacity below registered count
+        if event_data.capacity < event.registered_count:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot reduce capacity below current registered count ({event.registered_count})"
+            )
+
+        # Build update dict with all fields
+        update_fields = {
+            'title': event_data.title,
+            'description': event_data.description,
+            'category_id': event_data.categoryId,
+            'date': event_date,
+            'start_time': event_data.startTime,
+            'end_time': event_data.endTime,
+            'venue': event_data.venue,
+            'location': event_data.location,
+            'capacity': event_data.capacity,
+            'image_url': event_data.imageUrl,
+            'tags': event_data.tags if event_data.tags else []
+        }
+
+        # Handle status update if provided
+        if event_data.status is not None:
             try:
-                update_fields['date'] = date.fromisoformat(event_data.date)
+                # Validate and convert status string to EventStatus enum
+                new_status = EventStatus(event_data.status.lower())
+
+                # Business rule: Organizers can only set status to 'draft' or 'pending'
+                # They cannot directly publish or cancel via update
+                if new_status in [EventStatus.DRAFT, EventStatus.PENDING]:
+                    update_fields['status'] = new_status
+                elif new_status == EventStatus.CANCELLED:
+                    # Use the cancel_event method instead
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Use the cancel endpoint to cancel an event"
+                    )
+                elif new_status == EventStatus.PUBLISHED:
+                    # Only admins can publish directly
+                    if organizer.role.value != 'admin':
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Only admins can publish events directly. Set status to 'pending' for admin approval."
+                        )
+                    update_fields['status'] = new_status
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid date format. Use YYYY-MM-DD"
+                    detail=f"Invalid status. Must be one of: draft, pending, published, cancelled"
                 )
-        
-        if event_data.startTime is not None:
-            update_fields['start_time'] = event_data.startTime
-        
-        if event_data.endTime is not None:
-            update_fields['end_time'] = event_data.endTime
-        
-        if event_data.venue is not None:
-            update_fields['venue'] = event_data.venue
-        
-        if event_data.location is not None:
-            update_fields['location'] = event_data.location
-        
-        if event_data.capacity is not None:
-            # Cannot reduce capacity below registered count
-            if event_data.capacity < event.registered_count:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Cannot reduce capacity below current registered count ({event.registered_count})"
-                )
-            update_fields['capacity'] = event_data.capacity
-        
-        if event_data.imageUrl is not None:
-            update_fields['image_url'] = event_data.imageUrl
-        
-        if event_data.tags is not None:
-            update_fields['tags'] = event_data.tags
-        
+
         # Update event
-        if update_fields:
-            event = self.event_repo.update(event, **update_fields)
-            
-            # Log audit
-            self.audit_repo.create(
-                action=AuditAction.EVENT_UPDATED,
-                actor_id=organizer.id,
-                actor_name=organizer.name,
-                actor_role=organizer.role.value,
-                target_type=TargetType.EVENT,
-                target_id=event.id,
-                target_name=event.title,
-                details=f"Event '{event.title}' updated",
-                metadata={"updated_fields": list(update_fields.keys())},
-                ip_address=ip_address,
-                user_agent=user_agent
-            )
-        
+        event = self.event_repo.update(event, **update_fields)
+
+        # Log audit
+        self.audit_repo.create(
+            action=AuditAction.EVENT_UPDATED,
+            actor_id=organizer.id,
+            actor_name=organizer.name,
+            actor_role=organizer.role.value,
+            target_type=TargetType.EVENT,
+            target_id=event.id,
+            target_name=event.title,
+            details=f"Event '{event.title}' updated",
+            metadata={"updated_fields": list(update_fields.keys())},
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+
         return event
     
     def cancel_event(

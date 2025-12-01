@@ -37,14 +37,16 @@ cors_origins = settings.cors_origins_list if not settings.DEBUG else [
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3030",
     "http://127.0.0.1:5173",
+    "*",  # Allow all origins in development (includes localtunnel/ngrok)
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origins=["*"] if settings.DEBUG else cors_origins,  # Allow all in debug mode
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 
