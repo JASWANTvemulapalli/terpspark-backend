@@ -3,7 +3,7 @@ API router initialization.
 Aggregates all API route modules.
 """
 from fastapi import APIRouter
-from app.api import auth, events
+from app.api import auth, events, registrations, waitlist, organizer, admin
 
 # Create main API router
 api_router = APIRouter()
@@ -14,8 +14,14 @@ api_router.include_router(auth.router)
 # Include event routes (Phase 2: Event Discovery & Browse)
 api_router.include_router(events.router)
 
-# Future phase routers will be added here:
-# from app.api import registrations, organizer, admin
-# api_router.include_router(registrations.router)
-# api_router.include_router(organizer.router)
-# api_router.include_router(admin.router)
+# Include registration routes (Phase 3: Student Registration Flow)
+api_router.include_router(registrations.router)
+
+# Include waitlist routes (Phase 3: Student Registration Flow)
+api_router.include_router(waitlist.router)
+
+# Include organizer routes (Phase 4: Organizer Management)
+api_router.include_router(organizer.router)
+
+# Include admin routes (Phase 5: Admin Console & Management)
+api_router.include_router(admin.router)

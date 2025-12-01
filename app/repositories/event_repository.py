@@ -391,3 +391,58 @@ class EventRepository:
             "by_status": {status.value: count for status, count in by_status}
         }
 
+    def check_venue_conflict(
+        self,
+        venue: str,
+        event_date: date,
+        start_time: str,
+        end_time: str,
+        exclude_event_id: Optional[str] = None
+    ) -> Optional[Event]:
+        """
+        Check if there's a venue conflict for the given date and time.
+
+        Args:
+            venue: Venue name
+            event_date: Event date
+            start_time: Start time in HH:MM format
+            end_time: End time in HH:MM format
+            exclude_event_id: Optional event ID to exclude (for updates)
+
+        Returns:
+            Optional[Event]: Conflicting event if found, None otherwise
+        """
+        from datetime import time
+
+        # Parse times
+        start = time.fromisoformat(start_time)
+        end = time.fromisoformat(end_time)
+
+        # Build query for events at same venue on same date
+        query = self.db.query(Event).filter(
+            and_(
+                Event.venue == venue,
+                Event.date == event_date,
+                Event.status.in_([EventStatus.PENDING, EventStatus.PUBLISHED])  # Only check non-cancelled events
+            )
+        )
+
+        # Exclude current event if updating
+        if exclude_event_id:
+            query = query.filter(Event.id != exclude_event_id)
+
+        # Get all events at this venue on this date
+        events = query.all()
+
+        # Check for time overlap
+        for existing_event in events:
+            existing_start = existing_event.start_time
+            existing_end = existing_event.end_time
+
+            # Check if times overlap
+            # Overlap occurs if: new_start < existing_end AND new_end > existing_start
+            if start < existing_end and end > existing_start:
+                return existing_event
+
+        return None
+

@@ -5,8 +5,9 @@ Handles authentication operations and business rules.
 from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.user_repository import UserRepository
+from app.repositories.organizer_approval_repository import OrganizerApprovalRepository
 from app.core.security import verify_password, create_access_token
 from app.schemas.auth import UserLogin, UserCreate
 
@@ -17,12 +18,13 @@ class AuthService:
     def __init__(self, db: Session):
         """
         Initialize service with database session.
-        
+
         Args:
             db: SQLAlchemy database session
         """
         self.db = db
         self.user_repo = UserRepository(db)
+        self.approval_repo = OrganizerApprovalRepository(db)
     
     def authenticate_user(self, credentials: UserLogin) -> Tuple[User, str]:
         """
@@ -113,6 +115,18 @@ class AuthService:
                 department=user_data.department,
                 phone=user_data.phone
             )
+
+            # If user is organizer, create approval request
+            if user.role == UserRole.ORGANIZER:
+                reason = (
+                    f"User {user.name} ({user.email}) from {user.department} department "
+                    "requested organizer access during registration."
+                )
+                self.approval_repo.create(
+                    user_id=user.id,
+                    reason=reason
+                )
+
             return user
         except Exception as e:
             raise HTTPException(

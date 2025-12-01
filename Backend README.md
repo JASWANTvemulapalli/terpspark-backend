@@ -875,7 +875,7 @@ status?: 'all' | 'draft' | 'pending' | 'published' | 'cancelled'  // Default: 'a
 ---
 
 #### PUT `/api/organizer/events/:id`
-Update an event.
+Update an event with complete event data.
 
 **Headers:**
 ```
@@ -885,20 +885,39 @@ Authorization: Bearer {token}
 **Path Parameters:**
 - `id`: Event ID
 
-**Request Body:** (All fields optional)
+**Request Body:** (All fields required except status, imageUrl, and tags)
 ```json
 {
-  "title": "string",
-  "description": "string",
-  "categoryId": "string",
-  "date": "YYYY-MM-DD",
-  "startTime": "HH:MM",
-  "endTime": "HH:MM",
-  "venue": "string",
-  "location": "string",
-  "capacity": "number",
-  "imageUrl": "string",
-  "tags": ["string"]
+  "title": "string (5-200 chars)",
+  "description": "string (min 50 chars)",
+  "categoryId": "string (required)",
+  "date": "YYYY-MM-DD (required, must be in future)",
+  "startTime": "HH:MM (required, 24-hour format)",
+  "endTime": "HH:MM (required, must be after startTime)",
+  "venue": "string (2-200 chars)",
+  "location": "string (5-500 chars)",
+  "capacity": "number (1-5000, cannot be less than registered count)",
+  "imageUrl": "string (optional, max 500 chars)",
+  "tags": ["string"] (optional),
+  "status": "string (optional: 'draft', 'pending', 'published', 'cancelled')"
+}
+```
+
+**Example Request:**
+```json
+{
+  "title": "Updated AI Workshop",
+  "description": "Join us for an updated hands-on workshop covering the latest in artificial intelligence and machine learning. Perfect for students interested in AI!",
+  "categoryId": "550e8400-e29b-41d4-a716-446655440003",
+  "date": "2025-12-15",
+  "startTime": "14:00",
+  "endTime": "17:00",
+  "venue": "Student Union Building",
+  "location": "Room 305, 3rd Floor",
+  "capacity": 120,
+  "imageUrl": "https://example.com/ai-workshop.jpg",
+  "tags": ["workshop", "ai", "machine-learning", "tech"],
+  "status": "pending"
 }
 ```
 
@@ -908,18 +927,68 @@ Authorization: Bearer {token}
   "success": true,
   "message": "Event updated successfully",
   "event": {
-    // Updated event object
+    "id": "ad432c44-a5bb-4a98-89d6-c87d1d8b2cd4",
+    "title": "Updated AI Workshop",
+    "description": "Join us for an updated hands-on workshop...",
+    "categoryId": "550e8400-e29b-41d4-a716-446655440003",
+    "organizerId": "9db2afab-cad5-4c5d-bd7d-47a3b7edf680",
+    "date": "2025-12-15",
+    "startTime": "14:00",
+    "endTime": "17:00",
+    "venue": "Student Union Building",
+    "location": "Room 305, 3rd Floor",
+    "capacity": 120,
+    "registeredCount": 85,
+    "waitlistCount": 0,
+    "remainingCapacity": 35,
+    "status": "published",
+    "imageUrl": "https://example.com/ai-workshop.jpg",
+    "tags": ["workshop", "ai", "machine-learning", "tech"],
+    "isFeatured": false,
+    "createdAt": "2025-11-15T10:30:00Z",
+    "updatedAt": "2025-11-30T14:25:00Z",
+    "publishedAt": "2025-11-16T09:00:00Z",
+    "category": {
+      "id": "550e8400-e29b-41d4-a716-446655440003",
+      "name": "Technology",
+      "slug": "technology",
+      "color": "#3B82F6"
+    },
+    "organizer": {
+      "id": "9db2afab-cad5-4c5d-bd7d-47a3b7edf680",
+      "name": "Sarah Johnson",
+      "email": "organizer@umd.edu",
+      "department": "Computer Science"
+    }
   }
 }
 ```
 
+**Validation Rules:**
+- All fields are required (except status, imageUrl, tags)
+- Date must be in YYYY-MM-DD format and in the future
+- Start/end times must be in HH:MM format (24-hour)
+- End time must be after start time
+- Capacity cannot be reduced below current registered count
+- Category must exist and be active
+- Title: 5-200 characters
+- Description: minimum 50 characters
+- Venue: 2-200 characters
+- Location: 5-500 characters
+- Capacity: 1-5000
+
+**Status Update Rules:**
+- `status` field is optional (if not provided, status remains unchanged)
+- Organizers can set status to: `draft` or `pending`
+- Only admins can set status to: `published`
+- Cannot set status to `cancelled` via update (use cancel endpoint)
+- Valid status values: `draft`, `pending`, `published`, `cancelled`
+
 **Business Rules:**
-- Can only edit own events
-- Draft events: Full edit access
-- Pending events: Limited edit (no date/time changes)
-- Published events: Very limited edit (description, tags only)
-- Cannot edit cancelled events
-- If published event edited, may require re-approval
+- Can only update own events (or admin can update any)
+- Cannot update cancelled events
+- Organizer must be approved
+- All validations from event creation apply
 
 ---
 
