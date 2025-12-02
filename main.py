@@ -471,6 +471,480 @@ async def initialize_database():
         )
 
 
+# Database events initialization endpoint (UNPROTECTED - Remove after use in production!)
+@app.post("/init-db-events")
+async def initialize_events():
+    """
+    Initialize database with 25 realistic events distributed among approved organizers.
+
+    **WARNING**: This endpoint will DELETE ALL EXISTING EVENTS and create new sample events.
+    Available in all environments - REMOVE THIS ENDPOINT after running in production!
+
+    **What it does:**
+    - Deletes all existing events
+    - Creates 25 realistic events with researched data
+    - Distributes events among all approved organizers
+    - Uses existing categories and venues from database
+    - Sets 2 events with only 1 seat remaining
+    - Sets 3 events as fully booked
+    - All events are in PUBLISHED status
+    """
+
+    try:
+        from app.core.database import SessionLocal
+        from app.models.user import User, UserRole
+        from app.models.category import Category
+        from app.models.venue import Venue
+        from app.models.event import Event, EventStatus
+        from datetime import datetime, date, time, timedelta
+        import uuid
+
+        logger.info("Starting events initialization...")
+
+        db = SessionLocal()
+
+        try:
+            # Get all approved organizers
+            organizers = db.query(User).filter(
+                User.role == UserRole.ORGANIZER,
+                User.is_approved == True
+            ).all()
+
+            if not organizers:
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={
+                        "success": False,
+                        "error": "No approved organizers found in database",
+                        "code": "NO_ORGANIZERS"
+                    }
+                )
+
+            # Get all active categories
+            categories = db.query(Category).filter(Category.is_active == True).all()
+            if not categories:
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={
+                        "success": False,
+                        "error": "No active categories found in database",
+                        "code": "NO_CATEGORIES"
+                    }
+                )
+
+            # Get all active venues
+            venues = db.query(Venue).filter(Venue.is_active == True).all()
+            if not venues:
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={
+                        "success": False,
+                        "error": "No active venues found in database",
+                        "code": "NO_VENUES"
+                    }
+                )
+
+            # Helper function to find category by name
+            def get_category(name):
+                return next((c for c in categories if c.name.lower() == name.lower()), categories[0])
+
+            # Helper function to find venue by capacity
+            def get_venue_by_capacity(min_capacity):
+                suitable = [v for v in venues if v.capacity >= min_capacity]
+                return suitable[0] if suitable else venues[-1]
+
+            # Delete all existing events
+            logger.info("Deleting existing events...")
+            db.query(Event).delete()
+            db.commit()
+
+            # Create 25 realistic events
+            logger.info("Creating 25 realistic events...")
+            today = date.today()
+
+            events_data = [
+                {
+                    "title": "Introduction to Quantum Computing",
+                    "description": "Explore the fascinating world of quantum computing! Learn about qubits, quantum gates, and quantum algorithms. This workshop covers the basics of quantum mechanics as applied to computation, including hands-on exercises with IBM Quantum Experience. Perfect for students interested in cutting-edge technology.",
+                    "category": "Technology",
+                    "date_offset": 7,
+                    "start_time": "14:00",
+                    "end_time": "16:30",
+                    "capacity": 80,
+                    "registered": 0,
+                    "tags": ["Quantum Computing", "Technology", "Workshop", "IBM"],
+                    "image_url": "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=800"
+                },
+                {
+                    "title": "Annual College Park Half Marathon",
+                    "description": "Join us for the 15th Annual College Park Half Marathon! This scenic 13.1-mile race takes runners through the beautiful UMD campus and surrounding neighborhoods. All skill levels welcome. Race includes timing chips, finisher medals, post-race refreshments, and live entertainment. Proceeds benefit local charities.",
+                    "category": "Sports",
+                    "date_offset": 21,
+                    "start_time": "07:00",
+                    "end_time": "12:00",
+                    "capacity": 500,
+                    "registered": 500,  # Fully booked
+                    "tags": ["Marathon", "Running", "Sports", "Charity", "Fitness"],
+                    "image_url": "https://images.unsplash.com/photo-1452626038306-9aae5e071dd3?w=800"
+                },
+                {
+                    "title": "Cultural Night: Taste of Asia",
+                    "description": "Experience the rich diversity of Asian cultures! This immersive cultural celebration features traditional performances including Chinese lion dance, Indian classical music, Japanese taiko drumming, and Korean K-pop. Enjoy authentic cuisine from various Asian countries, interactive cultural booths, and language workshops.",
+                    "category": "Cultural",
+                    "date_offset": 14,
+                    "start_time": "18:00",
+                    "end_time": "22:00",
+                    "capacity": 300,
+                    "registered": 300,  # Fully booked
+                    "tags": ["Cultural", "Food", "Performance", "International", "Asia"],
+                    "image_url": "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800"
+                },
+                {
+                    "title": "Cybersecurity Bootcamp: Ethical Hacking",
+                    "description": "Learn the fundamentals of cybersecurity and ethical hacking in this intensive bootcamp. Topics include network security, penetration testing, vulnerability assessment, and security best practices. Hands-on labs include Kali Linux, Metasploit, and Wireshark. Led by industry professionals with real-world experience.",
+                    "category": "Technology",
+                    "date_offset": 10,
+                    "start_time": "13:00",
+                    "end_time": "17:00",
+                    "capacity": 50,
+                    "registered": 49,  # 1 seat left
+                    "tags": ["Cybersecurity", "Hacking", "Security", "Bootcamp", "Networking"],
+                    "image_url": "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=800"
+                },
+                {
+                    "title": "Python Programming Fundamentals",
+                    "description": "Master Python programming from scratch! This comprehensive course covers variables, data types, control structures, functions, object-oriented programming, and popular libraries like NumPy and Pandas. Includes hands-on coding exercises and real-world projects. No prior programming experience required.",
+                    "category": "Technology",
+                    "date_offset": 5,
+                    "start_time": "15:00",
+                    "end_time": "18:00",
+                    "capacity": 60,
+                    "registered": 59,  # 1 seat left
+                    "tags": ["Python", "Programming", "Coding", "Beginner-Friendly"],
+                    "image_url": "https://images.unsplash.com/photo-1526379095098-d400fd0bf935?w=800"
+                },
+                {
+                    "title": "Resume Building & Interview Skills Workshop",
+                    "description": "Land your dream job with expert guidance! Learn how to craft a compelling resume, write effective cover letters, and ace behavioral interviews. Includes one-on-one resume reviews, mock interview practice, and networking tips. Featuring recruiters from Fortune 500 companies sharing insider perspectives.",
+                    "category": "Career",
+                    "date_offset": 12,
+                    "start_time": "16:00",
+                    "end_time": "19:00",
+                    "capacity": 100,
+                    "registered": 82,
+                    "tags": ["Career", "Resume", "Interview", "Professional Development"],
+                    "image_url": "https://images.unsplash.com/photo-1586281380349-632531db7ed4?w=800"
+                },
+                {
+                    "title": "Mental Health Awareness Week Opening",
+                    "description": "Join us for the launch of Mental Health Awareness Week! This opening event features keynote speakers discussing mental health on campus, stress management techniques, mindfulness meditation sessions, and resource fair with campus counseling services. Free wellness kits for all attendees.",
+                    "category": "Wellness",
+                    "date_offset": 8,
+                    "start_time": "12:00",
+                    "end_time": "15:00",
+                    "capacity": 200,
+                    "registered": 156,
+                    "tags": ["Mental Health", "Wellness", "Mindfulness", "Self-Care"],
+                    "image_url": "https://images.unsplash.com/photo-1545205597-3d9d02c29597?w=800"
+                },
+                {
+                    "title": "Sustainability Summit: Campus Goes Green",
+                    "description": "Explore innovative solutions for environmental sustainability! This summit brings together students, faculty, and environmental experts to discuss climate action, renewable energy, waste reduction, and sustainable living. Features panel discussions, eco-innovation showcase, and campus sustainability project presentations.",
+                    "category": "Environmental",
+                    "date_offset": 18,
+                    "start_time": "09:00",
+                    "end_time": "16:00",
+                    "capacity": 150,
+                    "registered": 128,
+                    "tags": ["Sustainability", "Environment", "Climate", "Green Energy"],
+                    "image_url": "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=800"
+                },
+                {
+                    "title": "Basketball Tournament: Terps Challenge",
+                    "description": "Show your basketball skills in the annual Terps Challenge! 3v3 tournament open to all students. Compete for prizes and bragging rights. Professional referees, tournament bracket system, and championship trophy for winners. Food trucks and DJ entertainment throughout the day. Team registration or individual sign-up available.",
+                    "category": "Sports",
+                    "date_offset": 25,
+                    "start_time": "10:00",
+                    "end_time": "18:00",
+                    "capacity": 120,
+                    "registered": 96,
+                    "tags": ["Basketball", "Tournament", "Competition", "Sports"],
+                    "image_url": "https://images.unsplash.com/photo-1546519638-68e109498ffc?w=800"
+                },
+                {
+                    "title": "Data Science Career Panel",
+                    "description": "Get insights from data science professionals working at leading tech companies! Panel includes data scientists from Google, Amazon, Microsoft, and local startups. Discussion topics: career paths in data science, required skills, portfolio building, and industry trends in AI/ML. Q&A session and networking reception to follow.",
+                    "category": "Career",
+                    "date_offset": 15,
+                    "start_time": "17:00",
+                    "end_time": "19:30",
+                    "capacity": 90,
+                    "registered": 67,
+                    "tags": ["Data Science", "Career", "Panel", "Technology", "AI"],
+                    "image_url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800"
+                },
+                {
+                    "title": "Contemporary Art Exhibition Opening",
+                    "description": "Celebrate creativity at our Contemporary Art Exhibition featuring works by talented UMD student artists! The exhibition showcases diverse media including painting, sculpture, photography, digital art, and mixed media installations. Opening reception includes artist talks, live music, and refreshments. Exhibition runs for two weeks.",
+                    "category": "Arts",
+                    "date_offset": 9,
+                    "start_time": "18:30",
+                    "end_time": "21:00",
+                    "capacity": 75,
+                    "registered": 58,
+                    "tags": ["Art", "Exhibition", "Gallery", "Student Work", "Creative"],
+                    "image_url": "https://images.unsplash.com/photo-1561214115-f2f134cc4912?w=800"
+                },
+                {
+                    "title": "Startup Pitch Competition",
+                    "description": "Present your startup idea to real investors! Students pitch innovative business ideas to a panel of venture capitalists and successful entrepreneurs. Winner receives $10,000 seed funding, mentorship, and office space. All participants get feedback and networking opportunities. Open to all majors and disciplines.",
+                    "category": "Career",
+                    "date_offset": 28,
+                    "start_time": "14:00",
+                    "end_time": "18:00",
+                    "capacity": 200,
+                    "registered": 175,
+                    "tags": ["Startup", "Entrepreneurship", "Pitch", "Investment", "Innovation"],
+                    "image_url": "https://images.unsplash.com/photo-1556761175-b413da4baf72?w=800"
+                },
+                {
+                    "title": "Latin Dance Night: Salsa & Bachata",
+                    "description": "Get ready to move! Learn salsa and bachata from professional dance instructors in this high-energy cultural celebration. Beginner-friendly with separate instruction sessions for different skill levels. Live Latin music band, dance performances, and social dancing. No partner required - we rotate throughout the evening!",
+                    "category": "Cultural",
+                    "date_offset": 11,
+                    "start_time": "19:00",
+                    "end_time": "23:00",
+                    "capacity": 180,
+                    "registered": 142,
+                    "tags": ["Dance", "Latin", "Salsa", "Bachata", "Cultural", "Music"],
+                    "image_url": "https://images.unsplash.com/photo-1504609773096-104ff2c73ba4?w=800"
+                },
+                {
+                    "title": "Machine Learning Research Symposium",
+                    "description": "Discover cutting-edge ML research happening at UMD! Faculty and graduate students present their latest research in deep learning, computer vision, natural language processing, and reinforcement learning. Poster session, networking with researchers, and discussion of collaboration opportunities. Great for undergrads considering research or grad school.",
+                    "category": "Academic",
+                    "date_offset": 20,
+                    "start_time": "13:00",
+                    "end_time": "17:30",
+                    "capacity": 120,
+                    "registered": 94,
+                    "tags": ["Machine Learning", "Research", "AI", "Academic", "Symposium"],
+                    "image_url": "https://images.unsplash.com/photo-1527474305487-b87b222841cc?w=800"
+                },
+                {
+                    "title": "Yoga & Meditation Retreat",
+                    "description": "Escape campus stress with a rejuvenating wellness retreat! Full day of guided yoga sessions (suitable for all levels), meditation workshops, mindfulness practices, and relaxation techniques. Includes healthy lunch, aromatherapy, sound healing, and take-home wellness toolkit. Perfect for stress relief during midterms.",
+                    "category": "Wellness",
+                    "date_offset": 13,
+                    "start_time": "08:00",
+                    "end_time": "16:00",
+                    "capacity": 40,
+                    "registered": 38,
+                    "tags": ["Yoga", "Meditation", "Wellness", "Mindfulness", "Retreat"],
+                    "image_url": "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800"
+                },
+                {
+                    "title": "Gaming Tournament: League of Legends",
+                    "description": "Battle for the championship in the UMD League of Legends Tournament! 5v5 competitive matches with prize pool totaling $2,000. Professional casters, live streaming, and viewing party. All ranks welcome with separate brackets for different skill tiers. Registration includes tournament jersey and exclusive in-game rewards.",
+                    "category": "Sports",
+                    "date_offset": 30,
+                    "start_time": "11:00",
+                    "end_time": "20:00",
+                    "capacity": 100,
+                    "registered": 100,  # Fully booked
+                    "tags": ["Gaming", "Esports", "League of Legends", "Tournament", "Competition"],
+                    "image_url": "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800"
+                },
+                {
+                    "title": "Photography Workshop: Portrait Lighting",
+                    "description": "Master the art of portrait photography! Learn professional lighting techniques, camera settings, composition, and post-processing. Hands-on practice with studio equipment including softboxes, reflectors, and backdrops. Models provided for practice shots. Bring your DSLR or mirrorless camera. Beginner to intermediate level.",
+                    "category": "Arts",
+                    "date_offset": 16,
+                    "start_time": "14:30",
+                    "end_time": "18:30",
+                    "capacity": 25,
+                    "registered": 21,
+                    "tags": ["Photography", "Portrait", "Lighting", "Workshop", "Arts"],
+                    "image_url": "https://images.unsplash.com/photo-1554048612-b6a482bc67e5?w=800"
+                },
+                {
+                    "title": "Climate Action Workshop",
+                    "description": "Learn how to make a real environmental impact! Workshop covers carbon footprint reduction, sustainable lifestyle changes, campus composting program, renewable energy advocacy, and environmental policy. Interactive activities include building a terrarium and making eco-friendly products. Take action on climate change today!",
+                    "category": "Environmental",
+                    "date_offset": 22,
+                    "start_time": "15:00",
+                    "end_time": "18:00",
+                    "capacity": 60,
+                    "registered": 47,
+                    "tags": ["Climate Change", "Environment", "Sustainability", "Workshop"],
+                    "image_url": "https://images.unsplash.com/photo-1569163139394-de4798aa62b0?w=800"
+                },
+                {
+                    "title": "Research Methods in Social Sciences",
+                    "description": "Essential research methodology course for social science students! Topics include research design, quantitative and qualitative methods, statistical analysis with SPSS, survey design, interview techniques, and academic writing. Guest lectures from published researchers and hands-on data analysis projects. Earn research methodology certificate.",
+                    "category": "Academic",
+                    "date_offset": 6,
+                    "start_time": "10:00",
+                    "end_time": "14:00",
+                    "capacity": 80,
+                    "registered": 64,
+                    "tags": ["Research", "Social Science", "Methodology", "Statistics"],
+                    "image_url": "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=800"
+                },
+                {
+                    "title": "Jazz Night: Student Ensemble Performance",
+                    "description": "Enjoy an evening of sophisticated jazz performed by the UMD Student Jazz Ensemble! The concert features classic jazz standards, contemporary compositions, and student arrangements. Showcases talented musicians on saxophone, trumpet, piano, bass, and drums. Wine and cheese reception follows the performance.",
+                    "category": "Arts",
+                    "date_offset": 19,
+                    "start_time": "20:00",
+                    "end_time": "22:30",
+                    "capacity": 150,
+                    "registered": 118,
+                    "tags": ["Jazz", "Music", "Performance", "Concert", "Student"],
+                    "image_url": "https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=800"
+                },
+                {
+                    "title": "Blockchain & Cryptocurrency Seminar",
+                    "description": "Understand the technology behind Bitcoin and blockchain! This seminar explains blockchain fundamentals, cryptocurrency economics, smart contracts, DeFi (Decentralized Finance), and NFTs. Industry experts discuss real-world applications and career opportunities. Learn about blockchain development and crypto investing basics.",
+                    "category": "Technology",
+                    "date_offset": 24,
+                    "start_time": "16:30",
+                    "end_time": "19:00",
+                    "capacity": 110,
+                    "registered": 89,
+                    "tags": ["Blockchain", "Cryptocurrency", "Bitcoin", "Technology", "Finance"],
+                    "image_url": "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800"
+                },
+                {
+                    "title": "International Food Festival",
+                    "description": "Taste the world at UMD! This spectacular food festival features authentic cuisine from 30+ countries prepared by international student organizations. Live cultural performances throughout the day including traditional music, dance, and fashion shows. Cooking demonstrations, cultural trivia, and recipe exchange. All-you-can-taste ticket includes sampling from all booths!",
+                    "category": "Cultural",
+                    "date_offset": 27,
+                    "start_time": "11:00",
+                    "end_time": "17:00",
+                    "capacity": 400,
+                    "registered": 362,
+                    "tags": ["Food", "International", "Cultural", "Festival", "Diversity"],
+                    "image_url": "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=800"
+                },
+                {
+                    "title": "Mock Interview Day with Industry Professionals",
+                    "description": "Practice makes perfect! Get real interview experience with professionals from top companies. One-on-one mock interviews tailored to your field (technical, behavioral, or case interviews). Receive detailed feedback and improvement strategies. Industries represented: tech, finance, consulting, healthcare, and engineering. Limited spots available!",
+                    "category": "Career",
+                    "date_offset": 17,
+                    "start_time": "09:00",
+                    "end_time": "17:00",
+                    "capacity": 50,
+                    "registered": 45,
+                    "tags": ["Career", "Interview", "Professional Development", "Networking"],
+                    "image_url": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=800"
+                },
+                {
+                    "title": "Science Communication Workshop",
+                    "description": "Learn to explain complex science to everyone! Workshop teaches effective science communication for diverse audiences. Topics include storytelling techniques, visual design, social media for science, public speaking, and science journalism. Perfect for STEM students, researchers, and aspiring science communicators. Practice sessions with feedback from communication professionals.",
+                    "category": "Academic",
+                    "date_offset": 23,
+                    "start_time": "13:30",
+                    "end_time": "17:00",
+                    "capacity": 45,
+                    "registered": 36,
+                    "tags": ["Science", "Communication", "Public Speaking", "Academic"],
+                    "image_url": "https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=800"
+                },
+                {
+                    "title": "Ultimate Frisbee Spring League Kickoff",
+                    "description": "Start of the Spring Ultimate Frisbee intramural season! Join teams for weekly games throughout the semester. All skill levels welcome - beginner clinic before first game. League includes regular season games, playoffs, and championship tournament. Make new friends while staying active. Equipment provided, just bring enthusiasm!",
+                    "category": "Sports",
+                    "date_offset": 4,
+                    "start_time": "16:00",
+                    "end_time": "19:00",
+                    "capacity": 80,
+                    "registered": 68,
+                    "tags": ["Ultimate Frisbee", "Sports", "Intramural", "Recreation"],
+                    "image_url": "https://images.unsplash.com/photo-1587280501635-68a0e82cd5ff?w=800"
+                }
+            ]
+
+            # Distribute events among organizers
+            events = []
+            for i, event_data in enumerate(events_data):
+                organizer = organizers[i % len(organizers)]
+                category = get_category(event_data["category"])
+
+                # Calculate venue based on capacity
+                venue = get_venue_by_capacity(event_data["capacity"])
+
+                event_date = today + timedelta(days=event_data["date_offset"])
+                start_hour, start_min = map(int, event_data["start_time"].split(":"))
+                end_hour, end_min = map(int, event_data["end_time"].split(":"))
+
+                event = Event(
+                    id=str(uuid.uuid4()),
+                    title=event_data["title"],
+                    description=event_data["description"],
+                    category_id=category.id,
+                    organizer_id=organizer.id,
+                    date=event_date,
+                    start_time=time(start_hour, start_min),
+                    end_time=time(end_hour, end_min),
+                    venue=venue.name,
+                    location=f"{venue.building}, {venue.name}",
+                    capacity=event_data["capacity"],
+                    registered_count=event_data["registered"],
+                    waitlist_count=0,
+                    status=EventStatus.PUBLISHED,
+                    tags=event_data["tags"],
+                    image_url=event_data.get("image_url"),
+                    is_featured=True,
+                    published_at=datetime.utcnow()
+                )
+                db.add(event)
+                events.append(event)
+
+            db.commit()
+            logger.info(f"Created {len(events)} events")
+
+            # Count special events
+            one_seat_left = len([e for e in events if e.capacity - e.registered_count == 1])
+            fully_booked = len([e for e in events if e.registered_count >= e.capacity])
+
+            return {
+                "success": True,
+                "message": "Events initialized successfully",
+                "summary": {
+                    "total_events": len(events),
+                    "published_events": len(events),
+                    "organizers_used": len(organizers),
+                    "events_with_one_seat_left": one_seat_left,
+                    "fully_booked_events": fully_booked,
+                    "categories_used": len(set(e.category_id for e in events)),
+                    "venues_used": len(set(e.venue for e in events))
+                },
+                "organizer_distribution": {
+                    org.email: len([e for e in events if e.organizer_id == org.id])
+                    for org in organizers
+                }
+            }
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error during events initialization: {str(e)}")
+            raise
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Failed to initialize events: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "success": False,
+                "error": f"Failed to initialize events: {str(e)}",
+                "code": "INITIALIZATION_FAILED"
+            }
+        )
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
