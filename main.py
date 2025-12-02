@@ -553,6 +553,12 @@ async def initialize_events():
                 suitable = [v for v in venues if v.capacity >= min_capacity]
                 return suitable[0] if suitable else venues[-1]
 
+            # Delete all existing registrations first (due to foreign key constraints)
+            logger.info("Deleting existing registrations...")
+            from app.models.registration import Registration
+            db.query(Registration).delete()
+            db.commit()
+
             # Delete all existing events
             logger.info("Deleting existing events...")
             db.query(Event).delete()
