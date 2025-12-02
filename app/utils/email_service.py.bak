@@ -1,6 +1,6 @@
 """
 Email notification service for TerpSpark.
-Supports both mock (console) and SendGrid API (real email) modes.
+Supports both mock (console) and SMTP (real email) modes.
 Configured via EMAIL_MODE environment variable.
 """
 from sqlalchemy.orm import Session
@@ -9,8 +9,11 @@ from app.models.registration import Registration
 from app.models.user import User
 from app.core.config import settings
 import logging
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+import smtplib
+import base64
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 from pathlib import Path
 from typing import Optional
 
@@ -19,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 class EmailService:
     """
-    Email service that supports both mock (console) and SendGrid API (real email) modes.
-    Mode is controlled by EMAIL_MODE environment variable: "mock" or "sendgrid"
+    Email service that supports both mock (console) and SMTP (real email) modes.
+    Mode is controlled by EMAIL_MODE environment variable: "mock" or "smtp"
     """
 
     def __init__(self, db: Session):
@@ -33,54 +36,75 @@ class EmailService:
         self.db = db
         self.mode = settings.EMAIL_MODE.lower()
         self.templates_dir = Path(__file__).parent.parent / "templates" / "emails"
-        self.sendgrid_client = None
 
         # Validate mode
-        if self.mode not in ["mock", "sendgrid"]:
+        if self.mode not in ["mock", "smtp"]:
             logger.warning(f"Invalid EMAIL_MODE '{self.mode}', defaulting to 'mock'")
             self.mode = "mock"
 
-        # Initialize SendGrid if in sendgrid mode
-        if self.mode == "sendgrid":
-            if not settings.SENDGRID_API_KEY:
-                logger.warning("SENDGRID_API_KEY not set, falling back to mock mode")
-                self.mode = "mock"
-            else:
-                self.sendgrid_client = SendGridAPIClient(settings.SENDGRID_API_KEY)
-
         logger.info(f"EmailService initialized in '{self.mode}' mode")
 
-    def _send_sendgrid_email(
+    def _send_smtp_email(
         self,
         to_email: str,
         subject: str,
-        html_content: str
+        html_content: str,
+        qr_code_base64: Optional[str] = None
     ) -> bool:
         """
-        Send email via SendGrid API.
+        Send email via SMTP.
 
         Args:
             to_email: Recipient email address
             subject: Email subject
             html_content: HTML email content
+            qr_code_base64: Base64 encoded QR code image (optional)
 
         Returns:
             bool: True if sent successfully, False otherwise
         """
         try:
-            message = Mail(
-                from_email=f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>",
-                to_emails=to_email,
-                subject=subject,
-                html_content=html_content
-            )
+            # Create message
+            msg = MIMEMultipart('related')
+            msg['Subject'] = subject
+            msg['From'] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
+            msg['To'] = to_email
 
-            response = self.sendgrid_client.send(message)
-            logger.info(f"SendGrid email sent successfully to {to_email}, Status Code: {response.status_code}")
+            # Attach HTML content
+            html_part = MIMEText(html_content, 'html')
+            msg.attach(html_part)
+
+            # Attach QR code image if provided
+            if qr_code_base64:
+                # Remove data:image/png;base64, prefix if present
+                if qr_code_base64.startswith('data:image/png;base64,'):
+                    qr_code_base64 = qr_code_base64.replace('data:image/png;base64,', '')
+
+                # Decode base64 to bytes
+                qr_image_data = base64.b64decode(qr_code_base64)
+
+                # Create image attachment
+                image = MIMEImage(qr_image_data, name='qr_code.png')
+                image.add_header('Content-ID', '<qr_code>')
+                image.add_header('Content-Disposition', 'inline', filename='qr_code.png')
+                msg.attach(image)
+
+            # Connect to SMTP server and send
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+                if settings.SMTP_USE_TLS:
+                    server.starttls()
+
+                # Login
+                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+
+                # Send email
+                server.send_message(msg)
+
+            logger.info(f"SMTP email sent successfully to {to_email}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to send SendGrid email to {to_email}: {str(e)}")
+            logger.error(f"Failed to send SMTP email to {to_email}: {str(e)}")
             return False
 
     def _print_mock_email(
@@ -141,7 +165,7 @@ SUBJECT: {subject}
 
         subject = f"✅ Registration Confirmed - {event.title}"
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             # Load HTML template
             template_path = self.templates_dir / "registration_confirmation.html"
 
@@ -164,10 +188,11 @@ SUBJECT: {subject}
             html_content = html_content.replace('{{ guests_info }}', guests_text)
             html_content = html_content.replace('{{ ticket_code }}', registration.ticket_code)
 
-            return self._send_sendgrid_email(
+            return self._send_smtp_email(
                 to_email=user.email,
                 subject=subject,
-                html_content=html_content
+                html_content=html_content,
+                qr_code_base64=registration.qr_code
             )
         else:
             # Mock mode - print to console
@@ -244,7 +269,7 @@ Changed your mind? You can register again if spots are available.
 - The TerpSpark Team
         """
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             # For now, use simple HTML wrapper
             html_content = f"""
             <html>
@@ -253,7 +278,7 @@ Changed your mind? You can register again if spots are available.
             </body>
             </html>
             """
-            return self._send_sendgrid_email(user.email, subject, html_content)
+            return self._send_smtp_email(user.email, subject, html_content)
         else:
             self._print_mock_email(user.email, subject, content)
             return True
@@ -311,7 +336,7 @@ Present this QR code at event check-in.
 - The TerpSpark Team
         """
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             html_content = f"""
             <html>
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -319,10 +344,11 @@ Present this QR code at event check-in.
             </body>
             </html>
             """
-            return self._send_sendgrid_email(
+            return self._send_smtp_email(
                 to_email=user.email,
                 subject=subject,
-                html_content=html_content
+                html_content=html_content,
+                qr_code_base64=registration.qr_code
             )
         else:
             self._print_mock_email(user.email, subject, content)
@@ -371,7 +397,7 @@ You can check your waitlist status anytime in your account.
 - The TerpSpark Team
         """
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             html_content = f"""
             <html>
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -379,7 +405,7 @@ You can check your waitlist status anytime in your account.
             </body>
             </html>
             """
-            return self._send_sendgrid_email(user.email, subject, html_content)
+            return self._send_smtp_email(user.email, subject, html_content)
         else:
             self._print_mock_email(user.email, subject, content)
             return True
@@ -407,7 +433,7 @@ You can check your waitlist status anytime in your account.
 
         subject = f"⚠️ Event Cancelled - {event.title}"
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             template_path = self.templates_dir / "event_cancelled.html"
             if template_path.exists():
                 html_content = template_path.read_text()
@@ -417,7 +443,7 @@ You can check your waitlist status anytime in your account.
                 html_content = html_content.replace('{{event_time}}', event_time)
                 html_content = html_content.replace('{{event_venue}}', event.venue)
                 html_content = html_content.replace('{{organizer_name}}', organizer_name)
-                return self._send_sendgrid_email(attendee.email, subject, html_content)
+                return self._send_smtp_email(attendee.email, subject, html_content)
 
         # Fallback/Mock mode
         content = f"""
@@ -456,7 +482,7 @@ We apologize for any inconvenience.
         """
         subject = "✅ Organizer Request Approved - TerpSpark"
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             template_path = self.templates_dir / "organizer_approved.html"
             if template_path.exists():
                 html_content = template_path.read_text()
@@ -470,7 +496,7 @@ We apologize for any inconvenience.
                     # Remove the notes section
                     import re
                     html_content = re.sub(r'{{#if notes}}.*?{{/if}}', '', html_content, flags=re.DOTALL)
-                return self._send_sendgrid_email(user.email, subject, html_content)
+                return self._send_smtp_email(user.email, subject, html_content)
 
         # Fallback/Mock mode
         notes_text = f"\nAdmin Notes: {notes}\n" if notes else ""
@@ -508,13 +534,13 @@ Get started: https://terpspark.umd.edu/organizer/dashboard
         """
         subject = "Organizer Request Update - TerpSpark"
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             template_path = self.templates_dir / "organizer_rejected.html"
             if template_path.exists():
                 html_content = template_path.read_text()
                 html_content = html_content.replace('{{user_name}}', user.name)
                 html_content = html_content.replace('{{notes}}', notes)
-                return self._send_sendgrid_email(user.email, subject, html_content)
+                return self._send_smtp_email(user.email, subject, html_content)
 
         # Fallback/Mock mode
         content = f"""
@@ -555,7 +581,7 @@ You may reapply in the future after addressing these concerns.
 
         subject = f"✅ Event Approved - {event.title}"
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             template_path = self.templates_dir / "event_approved.html"
             if template_path.exists():
                 html_content = template_path.read_text()
@@ -574,7 +600,7 @@ You may reapply in the future after addressing these concerns.
                 else:
                     import re
                     html_content = re.sub(r'{{#if notes}}.*?{{/if}}', '', html_content, flags=re.DOTALL)
-                return self._send_sendgrid_email(organizer.email, subject, html_content)
+                return self._send_smtp_email(organizer.email, subject, html_content)
 
         # Fallback/Mock mode
         notes_text = f"\nAdmin Notes: {notes}\n" if notes else ""
@@ -616,7 +642,7 @@ View dashboard: https://terpspark.umd.edu/organizer/events/{event.id}
 
         subject = f"Event Review Update - {event.title}"
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             template_path = self.templates_dir / "event_rejected.html"
             if template_path.exists():
                 html_content = template_path.read_text()
@@ -625,7 +651,7 @@ View dashboard: https://terpspark.umd.edu/organizer/events/{event.id}
                 html_content = html_content.replace('{{submitted_date}}', submitted_date)
                 html_content = html_content.replace('{{notes}}', notes)
                 html_content = html_content.replace('{{event_id}}', event.id)
-                return self._send_sendgrid_email(organizer.email, subject, html_content)
+                return self._send_smtp_email(organizer.email, subject, html_content)
 
         # Fallback/Mock mode
         content = f"""
@@ -675,7 +701,7 @@ Edit event: https://terpspark.umd.edu/organizer/events/{event.id}
 
         subject = f"📢 {subject_text} - {event.title}"
 
-        if self.mode == "sendgrid":
+        if self.mode == "smtp":
             template_path = self.templates_dir / "announcement.html"
             if template_path.exists():
                 html_content = template_path.read_text()
@@ -693,7 +719,7 @@ Edit event: https://terpspark.umd.edu/organizer/events/{event.id}
                 else:
                     html_content = html_content.replace('{{ticket_code}}', 'N/A')
                     html_content = html_content.replace('{{registration_id}}', '')
-                return self._send_sendgrid_email(attendee.email, subject, html_content)
+                return self._send_smtp_email(attendee.email, subject, html_content)
 
         # Fallback/Mock mode
         content = f"""

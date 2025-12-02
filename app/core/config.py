@@ -35,15 +35,11 @@ class Settings(BaseSettings):
     BCRYPT_ROUNDS: int = 12
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     
-    # Email Configuration
-    EMAIL_MODE: str = "mock"  # "mock" or "smtp" - use mock for dev, smtp for production
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USER: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_FROM_EMAIL: str = "terpspark.events@gmail.com"
-    SMTP_FROM_NAME: str = "TerpSpark"
-    SMTP_USE_TLS: bool = True
+    # Email Configuration - SendGrid API
+    EMAIL_MODE: str = "mock"  # "mock" or "sendgrid" - use mock for dev, sendgrid for production
+    SENDGRID_API_KEY: str = ""
+    EMAIL_FROM: str = "terpspark.events@gmail.com"
+    EMAIL_FROM_NAME: str = "TerpSpark"
     
     # Rate Limiting
     RATE_LIMIT_LOGIN: str = "5/15minutes"
